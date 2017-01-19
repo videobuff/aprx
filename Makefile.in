@@ -93,10 +93,10 @@ profile:
 
 
 $(PROGAPRX):	$(OBJSAPRX) VERSION Makefile
-		$(LD) $(LDFLAGS) -o $@ $(OBJSAPRX) $(LIBS)
+		$(CC) $(CCFLAGS) -o $@ $(OBJSAPRX) $(LIBS)
 
 $(PROGSTAT):	$(OBJSSTAT) VERSION Makefile
-		$(LD) $(LDFLAGS) -o $@ $(OBJSSTAT) $(LIBS)
+		$(CC) $(CCFLAGS) -o $@ $(OBJSSTAT) $(LIBS)
 
 .PHONY:		man
 man:		$(MAN)
