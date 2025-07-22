@@ -1,6 +1,6 @@
 /* **************************************************************** *
  *                                                                  *
- *  APRX -- 2nd generation APRS iGate and digi with                 *
+ *  Aprx -- 2nd generation APRS I-gate and digi with                *
  *          minimal requirement of esoteric facilities or           *
  *          libraries of any kind beyond UNIX system libc.          *
  *                                                                  *
@@ -13,6 +13,8 @@
 #include "aprx.h"
 
 
+// Verify the sanity of a TNC2 formatted call,
+//  and return a pointer to after the callsign
 const char *tnc2_verify_callsign_format(const char *t, int starok, int strictax25, const char *e)
 {
 	const char *s = t;
@@ -142,21 +144,6 @@ static const char *tnc2_forbidden_via_stationid(const char *t, const int stricta
 	return s;
 }
 
-/*
-static int tnc2_forbidden_data(const char *t)
-{
-	int i;
-
-	for (i = 0; i < dataregscount; ++i) {
-		int stat = regexec(dataregs[i], t, 0, NULL, 0);
-		if (stat == 0)
-			return 1;	// MATCH!
-	}
-
-	return 0;
-}
-*/
-
 void verblog(const char *portname, int istx, const char *tnc2buf, int tnc2len) {
     if (verbout) {
         printf("%ld\t%-9s ", (long) tick.tv_sec, portname);
@@ -167,13 +154,20 @@ void verblog(const char *portname, int istx, const char *tnc2buf, int tnc2len) {
 }
 
 /*
- * The  tnc2_rxgate()  is actual RX-iGate filter function, and processes
+ * The  tnc2_rxgate()  is actual RX I-gate filter function, and processes
  * prepated TNC2 format text presentation of the packet.
  * It does presume that the record is in a buffer that can be written on!
  */
 
-void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf, int tnc2addrlen, int tnc2len, const int discard0, const int strictax25_)
-{
+void igate_to_aprsis(
+		const char *portname,
+		const int tncid,
+		const char *tnc2buf,
+		int tnc2addrlen,
+		int tnc2len,
+		const int discard0,
+		const int strictax25_) {
+
 	const char *tp, *t, *t0;
 	const char *s;
 	const char *ae;
@@ -185,26 +179,20 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 	ae = tp + tnc2addrlen;  // 3rd-party recursion moves ae
 	e  = tp + tnc2len;      // stays the same all the time
 
-	redo_frame_filter:;
+redo_frame_filter:;
 
 	t  = tp;
 	t0 = NULL;
 
 	/* t == beginning of the TNC2 format packet */
 
-	/*
-	 * If any of following matches, discard the packet!
-	 * next if ($axpath =~ m/^WIDE/io); # Begins with = is sourced by..
-	 * next if ($axpath =~ m/^RELAY/io);
-	 * next if ($axpath =~ m/^TRACE/io);
-	 */
+	// Check the source callsign to see if it's an invalid source
 	s = tnc2_forbidden_source_stationid(t, strictax25, e);
 	if (s)
 		t = (char *) s;
 	else {
 		/* Forbidden in source fields.. */
-		if (debug)
-			printf("TNC2 forbidden source stationid: '%.20s'\n", t);
+		if (debug) printf("TNC2 forbidden source stationid: '%.20s'\n", t);
 		goto discard;
 	}
 
@@ -213,8 +201,7 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 	if (*t == '>') {
 		++t;
 	} else {
-		if (debug)
-		    printf("TNC2 bad address format, expected '>', got: '%.20s'\n", t);
+		if (debug) printf("TNC2 bad address format, expected '>', got: '%.20s'\n", t);
 		goto discard;
 	}
 
@@ -222,8 +209,7 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 	if (s)
 		t = (char *) s;
 	else {
-		if (debug)
-			printf("TNC2 forbidden (by REGEX) destination stationid: '%.20s'\n", t);
+		if (debug) printf("TNC2 forbidden (by REGEX) destination stationid: '%.20s'\n", t);
 		goto discard;
 	}
 
@@ -231,42 +217,30 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 		if (*t == ',') {
 			++t;
 		} else {
-			if (debug)
-				printf("TNC2 via address syntax bug, wanted ',' or ':', got: '%.20s'\n", t);
+			if (debug) printf("TNC2 via address syntax bug, wanted ',' or ':', got: '%.20s'\n", t);
 			goto discard;
 		}
 
-		/*
-		 *  next if ($axpath =~ m/RFONLY/io); # Has any of these in via fields..
-		 *  next if ($axpath =~ m/TCPIP/io);
-		 *  next if ($axpath =~ m/TCPXX/io);
-		 *  next if ($axpath =~ m/NOGATE/io); # .. drop it.
-		 */
+		// Sanity check the via hops to make sure we don't have a TCP/IP via
+		//  or a NOGATE via so we shouldn't gateway this to the Internet
 
 		s = tnc2_forbidden_via_stationid(t, strictax25, e);
 		if (!s) {
 			/* Forbidden in via fields.. */
-			if (debug)
-				printf("TNC2 forbidden VIA stationid, got: '%.20s'\n", t);
+			if (debug) printf("TNC2 forbidden VIA stationid, got: '%.20s'\n", t);
 			goto discard;
 		} else
 			t = (char *) s;
 
-
 	}
-	/* Now we have processed the address, this should be ABORT time if
-	   the current character is not ':' !  */
+
+	// We've now parsed the whole header. The next character REALLY needs to be
+	// a colon, or something is terribly wrong.
 	if (*t == ':') {
-#if 0
-	  // *t++ = 0;	/* turn it to NUL character */
-#else
-	  /* Don't zero! */
-	  ++t;
-#endif
-	  ;
+		/* Don't zero! */
+		++t;
 	} else {
-		if (debug)
-			printf("TNC2 address parsing did not find ':':  '%.20s'\n",t);
+		if (debug) printf("TNC2 address parsing did not find ':':  '%.20s'\n",t);
 		goto discard;
 	}
 	t0 = t;  // Start of payload
@@ -274,18 +248,9 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 	/* Now 't' points to data.. */
 
 
-/*
-	if (tnc2_forbidden_data(t)) {
-		if (debug)
-			printf("Forbidden data in TNC2 packet - REGEX match");
-		goto discard;
-	}
-*/
-
-	/* Will not relay messages that begin with '?' char: */
+	// DON'T I-gate ? APRS query packets, since that can cause bad things
 	if (*t == '?') {
-		if (debug)
-			printf("Will not relay packets where payload begins with '?'\n");
+		if (debug) printf("Will not I-gate packets where payload begins with '?'\n");
 		goto discard;
 	}
 
@@ -293,6 +258,10 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 	if (*t == '}') {
 		/* DEBUG OUTPUT TO STDOUT ! */
 		verblog(portname, 0, tp, tnc2len);
+		// Let's log the whole packet which we received
+		// But we're definitely discarding the outer packet because it's
+		// Third party
+		rflog(portname, 'd', discard, tp, tnc2len);
 
 		strictax25 = 0;
 		/* Copy the 3rd-party message content into begining of the buffer... */
@@ -303,8 +272,8 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 		// Address end must be searched again
 		ae = memchr(tp, ':', tnc2len);
 		if (ae == NULL) {
-		  // Bad 3rd-party frame
-		  goto discard;
+			// Bad 3rd-party frame
+			goto discard;
 		}
 		tnc2addrlen = (int)(ae - tp);
 
@@ -312,45 +281,34 @@ void igate_to_aprsis(const char *portname, const int tncid, const char *tnc2buf,
 		goto redo_frame_filter;
 	}
 
-
-
-	/* TODO: Verify message being of recognized APRS packet type */
-	/*   '\0x60', '\0x27':  MIC-E, len >= 9
-	 *   '!','=','/','{':   Normal or compressed location packet..
-	 *   '$':               NMEA data, if it begins as '$GP'
-	 *   '$':               WX data (maybe) if not NMEA data
-	 *   ';':               Object data, len >= 31
-	 *   ')':               Item data, len >= 18
-	 *   ':':               message, bulletin or aanouncement, len >= 11
-	 *   '<':               Station Capabilities, len >= 2
-	 *   '>':               Status report
-	 *   '}':               Third-party message
-	 * ...  and many more ...
+	/* At this point, the packet is good for I-gating. The receiving I-gate
+	 * must not perform duplicate filtering, since the APRS-IS server
+	 * may well use those duplicates for something, such as propagation
+	 * analysis or smarter message routing. The APRS-IS server will do
+	 * duplicate filtering just fine.
+	 *
+	 * The receiving I-gate should also not validate or limit the APRS packet
+	 * format/contents either, because that would impose limits on
+	 * future packet formats, experiments and improvements. The
+	 * packet's sender and recipient should agree on the format only.
 	 */
-
-	// FIXME: Duplicate filter messages to APRSIS
-	
 
 	/* _NO_ ending CRLF, the APRSIS subsystem adds it. */
 
-	/*
-	  printf("alen=%d  tlen=%d  tnc2buf=%s\n",t0-1-tnc2buf, e-t0, tnc2buf);
-	*/
 	discard = aprsis_queue(tp, tnc2addrlen, qTYPE_IGATED, portname, t0, e - t0); /* Send it.. */
 	/* DEBUG OUTPUT TO STDOUT ! */
 	verblog(portname, 0, tp, tnc2len);
 
 	if (0) {
- discard:;
-
+discard:;
 		discard = -1;
 	}
 
 	if (discard) {
 		erlang_add(portname, ERLANG_DROP, tnc2len, 1);
-                rflog(portname, 'd', discard, tp, tnc2len);
+		rflog(portname, 'd', discard, tp, tnc2len);
 	} else {
-                rflog(portname, 'R', discard, tp, tnc2len);
+		rflog(portname, 'R', discard, tp, tnc2len);
 	}
 }
 
@@ -379,7 +337,7 @@ static int forbidden_to_gate_addr(const char *s)
 
 
 /*
- * For APRSIS -> APRX -> RF gatewaying.
+ * For APRSIS -> Aprx -> RF gatewaying.
  * Have to convert incoming TNC2 format messge to AX.25..
  *
  * See:  http://www.aprs-is.net/IGateDetails.aspx
